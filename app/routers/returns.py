@@ -1,3 +1,4 @@
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -81,10 +82,21 @@ def approve_customer_return(
     ),
 ):
     try:
-        return approve_return(
-            db,
+        from app.models.return_request import ReturnRequest
+
+        return_request = db.get(
+            ReturnRequest,
             return_id,
         )
+
+        if not return_request:
+            raise ValueError("Return request not found")
+
+        return approve_return(
+            db,
+            return_request,
+        )
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -105,11 +117,22 @@ def reject_customer_return(
     ),
 ):
     try:
+        from app.models.return_request import ReturnRequest
+
+        return_request = db.get(
+            ReturnRequest,
+            return_id,
+        )
+
+        if not return_request:
+            raise ValueError("Return request not found")
+
         return reject_return(
             db,
-            return_id,
+            return_request,
             data.reason,
         )
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
