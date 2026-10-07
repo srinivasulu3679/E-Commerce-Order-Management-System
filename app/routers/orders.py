@@ -1,3 +1,4 @@
+
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -58,6 +59,7 @@ def create_order_endpoint(
             address_id,
         )
         return build_order_response(order)
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -113,6 +115,7 @@ def get_order_endpoint(
             current_user.role,
         )
         return build_order_response(order)
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -136,6 +139,7 @@ def cancel_order_endpoint(
             current_user.id,
         )
         return build_order_response(order)
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -151,15 +155,27 @@ def update_order_status_endpoint(
     order_id: int,
     status_data: OrderStatusUpdate,
     db: Annotated[Session, Depends(get_db)],
-    _: Annotated[User, Depends(require_admin)],
+    current_user: Annotated[User, Depends(require_admin)],
 ):
+    from app.models.order import Order
+
+    order = db.get(Order, order_id)
+
+    if not order:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Order not found",
+        )
+
     try:
         order = update_order_status(
             db,
-            order_id,
+            order,
             status_data.status,
         )
+
         return build_order_response(order)
+
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
