@@ -21,9 +21,22 @@ class Product(Base):
         index=True
     )
 
+    sku: Mapped[str] = mapped_column(
+        String(100),
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
     description: Mapped[str | None] = mapped_column(
         Text,
         nullable=True
+    )
+
+    category_id: Mapped[int] = mapped_column(
+        ForeignKey("categories.id"),
+        nullable=False,
+        index=True
     )
 
     price: Mapped[Decimal] = mapped_column(
@@ -36,8 +49,8 @@ class Product(Base):
         default=0
     )
 
-    category_id: Mapped[int] = mapped_column(
-        ForeignKey("categories.id"),
+    is_active: Mapped[bool] = mapped_column(
+        default=True,
         nullable=False,
         index=True
     )
@@ -62,5 +75,15 @@ class Product(Base):
 
     order_items = relationship(
         "OrderItem",
+        back_populates="product"
+    )
+
+    cart_items = relationship(
+        "CartItem",
+        back_populates="product"
+    )
+
+    reviews = relationship(
+        "Review",
         back_populates="product"
     )

@@ -1,17 +1,14 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.auth.dependencies import get_current_user, require_admin
+from app.auth.dependencies import require_admin, get_current_user
 from app.database import get_db
 from app.models.category import Category
-from app.models.user import User
-from app.schemas.category import (
-    CategoryCreate,
-    CategoryResponse,
-    CategoryUpdate,
-)
+from app.models.product import Product
+from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 
 
 router = APIRouter(
@@ -21,34 +18,28 @@ router = APIRouter(
 
 
 @router.post(
-    "",
+    "/",
     response_model=CategoryResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_category(
-    category_data: CategoryCreate,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    data: CategoryCreate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(require_admin),
 ):
-    existing_category = db.query(Category).filter(
-        Category.name == category_data.name
-    ).first()
+    existing = db.scalar(
+        select(Category).where(Category.name == data.name)
+    )
 
-    if existing_category:
+    if existing:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Category already exists",
         )
 
     category = Category(
-        name=category_data.name,
-        description=category_data.description,
+        name=data.name,
+        description=data.description,
     )
 
     db.add(category)
@@ -59,23 +50,22 @@ def create_category(
 
 
 @router.get(
-    "",
+    "/",
     response_model=list[CategoryResponse],
 )
-def list_categories(
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+def get_categories(
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
 ):
-    return (
-        db.query(Category)
-        .order_by(Category.name.asc())
-        .all()
+    return list(
+        db.scalars(
+            select(Category)
+            .order_by(Category.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+        ).all()
     )
 
 
@@ -85,18 +75,10 @@ def list_categories(
 )
 def get_category(
     category_id: int,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(get_current_user),
 ):
-    category = db.query(Category).filter(
-        Category.id == category_id
-    ).first()
+    category = db.get(Category, category_id)
 
     if not category:
         raise HTTPException(
@@ -113,19 +95,11 @@ def get_category(
 )
 def update_category(
     category_id: int,
-    category_data: CategoryUpdate,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    data: CategoryUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(require_admin),
 ):
-    category = db.query(Category).filter(
-        Category.id == category_id
-    ).first()
+    category = db.get(Category, category_id)
 
     if not category:
         raise HTTPException(
@@ -133,32 +107,24 @@ def update_category(
             detail="Category not found",
         )
 
-    update_data = category_data.model_dump(
-        exclude_unset=True
-    )
+    update_data = data.model_dump(exclude_unset=True)
 
     if "name" in update_data:
-        existing_category = (
-            db.query(Category)
-            .filter(
+        existing = db.scalar(
+            select(Category).where(
                 Category.name == update_data["name"],
                 Category.id != category_id,
             )
-            .first()
         )
 
-        if existing_category:
+        if existing:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Category name already exists",
+                detail="Category already exists",
             )
 
-    for field, value in update_data.items():
-        setattr(
-            category,
-            field,
-            value,
-        )
+    for key, value in update_data.items():
+        setattr(category, key, value)
 
     db.commit()
     db.refresh(category)
@@ -172,18 +138,10 @@ def update_category(
 )
 def delete_category(
     category_id: int,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(require_admin),
 ):
-    category = db.query(Category).filter(
-        Category.id == category_id
-    ).first()
+    category = db.get(Category, category_id)
 
     if not category:
         raise HTTPException(
@@ -191,10 +149,17 @@ def delete_category(
             detail="Category not found",
         )
 
-    if category.products:
+    active_product = db.scalar(
+        select(Product).where(
+            Product.category_id == category_id,
+            Product.is_active.is_(True),
+        )
+    )
+
+    if active_product:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Category cannot be deleted because it contains products",
+            detail="Category cannot be deleted while it has active products",
         )
 
     db.delete(category)

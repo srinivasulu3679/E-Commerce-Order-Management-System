@@ -1,47 +1,6 @@
-from datetime import datetime
 from decimal import Decimal
-from enum import Enum
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
-
-
-class OrderStatus(str, Enum):
-    pending = "pending"
-    confirmed = "confirmed"
-    shipped = "shipped"
-    delivered = "delivered"
-    cancelled = "cancelled"
-
-
-class OrderItemCreate(BaseModel):
-    product_id: int = Field(
-        ...,
-        gt=0
-    )
-
-    quantity: int = Field(
-        ...,
-        gt=0
-    )
-
-
-class OrderCreate(BaseModel):
-    customer_name: str = Field(
-        ...,
-        min_length=2,
-        max_length=150
-    )
-
-    customer_email: EmailStr
-
-    items: list[OrderItemCreate] = Field(
-        ...,
-        min_length=1
-    )
-
-
-class OrderStatusUpdate(BaseModel):
-    status: OrderStatus
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OrderItemResponse(BaseModel):
@@ -49,24 +8,36 @@ class OrderItemResponse(BaseModel):
     product_id: int
     quantity: int
     unit_price: Decimal
-    subtotal: Decimal
+    line_total: Decimal
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrderCreate(BaseModel):
+    address_id: int = Field(..., gt=0)
 
 
 class OrderResponse(BaseModel):
     id: int
-    customer_name: str
-    customer_email: EmailStr
-    user_id: int | None
-    total_amount: Decimal
-    status: OrderStatus
-    created_at: datetime
-    updated_at: datetime
-    order_items: list[OrderItemResponse] = []
+    order_number: str
+    customer_id: int
+    address_id: int
+    subtotal: Decimal
+    tax_amount: Decimal
+    delivery_charge: Decimal
+    grand_total: Decimal
+    status: str
+    payment_status: str
+    delivered_at: object | None
+    created_at: object
+    updated_at: object
+    items: list[OrderItemResponse]
 
-    model_config = ConfigDict(
-        from_attributes=True
+    model_config = ConfigDict(from_attributes=True)
+
+
+class OrderStatusUpdate(BaseModel):
+    status: str = Field(
+        ...,
+        pattern="^(Pending|Confirmed|Shipped|Delivered|Cancelled)$"
     )

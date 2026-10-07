@@ -15,34 +15,62 @@ class Order(Base):
         index=True
     )
 
-    customer_name: Mapped[str] = mapped_column(
-        String(150),
+    order_number: Mapped[str] = mapped_column(
+        String(50),
+        unique=True,
+        nullable=False,
+        index=True
+    )
+
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id"),
+        nullable=False,
+        index=True
+    )
+
+    address_id: Mapped[int] = mapped_column(
+        ForeignKey("addresses.id"),
+        nullable=False,
+        index=True
+    )
+
+    subtotal: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
         nullable=False
     )
 
-    customer_email: Mapped[str] = mapped_column(
-        String(150),
-        nullable=False,
-        index=True
-    )
-
-    user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id"),
-        nullable=True,
-        index=True
-    )
-
-    total_amount: Mapped[Decimal] = mapped_column(
+    tax_amount: Mapped[Decimal] = mapped_column(
         Numeric(12, 2),
-        nullable=False,
-        default=0
+        nullable=False
+    )
+
+    delivery_charge: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
+    )
+
+    grand_total: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2),
+        nullable=False
     )
 
     status: Mapped[str] = mapped_column(
         String(30),
+        default="Pending",
         nullable=False,
-        default="pending",
         index=True
+    )
+
+    payment_status: Mapped[str] = mapped_column(
+        String(30),
+        default="Unpaid",
+        nullable=False,
+        index=True
+    )
+
+    delivered_at: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        nullable=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -58,13 +86,30 @@ class Order(Base):
         nullable=False
     )
 
-    user = relationship(
+    customer = relationship(
         "User",
+        back_populates="orders"
+    )
+
+    address = relationship(
+        "Address",
         back_populates="orders"
     )
 
     order_items = relationship(
         "OrderItem",
+        back_populates="order",
+        cascade="all, delete-orphan"
+    )
+
+    payments = relationship(
+        "Payment",
+        back_populates="order",
+        cascade="all, delete-orphan"
+    )
+
+    returns = relationship(
+        "ReturnRequest",
         back_populates="order",
         cascade="all, delete-orphan"
     )

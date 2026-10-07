@@ -1,14 +1,14 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import DateTime, ForeignKey, Numeric
+from sqlalchemy import DateTime, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
 
 
-class OrderItem(Base):
-    __tablename__ = "order_items"
+class ReturnRequest(Base):
+    __tablename__ = "returns"
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
@@ -18,27 +18,36 @@ class OrderItem(Base):
     order_id: Mapped[int] = mapped_column(
         ForeignKey("orders.id", ondelete="CASCADE"),
         nullable=False,
+        unique=True,
         index=True
     )
 
-    product_id: Mapped[int] = mapped_column(
-        ForeignKey("products.id"),
+    customer_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
         nullable=False,
         index=True
     )
 
-    quantity: Mapped[int] = mapped_column(
+    reason: Mapped[str] = mapped_column(
+        Text,
         nullable=False
     )
 
-    unit_price: Mapped[Decimal] = mapped_column(
-        Numeric(10, 2),
-        nullable=False
+    status: Mapped[str] = mapped_column(
+        String(30),
+        default="Pending",
+        nullable=False,
+        index=True
     )
 
-    line_total: Mapped[Decimal] = mapped_column(
+    refund_amount: Mapped[Decimal | None] = mapped_column(
         Numeric(12, 2),
-        nullable=False
+        nullable=True
+    )
+
+    rejection_reason: Mapped[str | None] = mapped_column(
+        Text,
+        nullable=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -56,10 +65,10 @@ class OrderItem(Base):
 
     order = relationship(
         "Order",
-        back_populates="order_items"
+        back_populates="returns"
     )
 
-    product = relationship(
-        "Product",
-        back_populates="order_items"
+    customer = relationship(
+        "User",
+        back_populates="returns"
     )

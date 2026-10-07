@@ -40,7 +40,7 @@ def verify_password(
 
 def create_access_token(
     data: dict,
-    expires_minutes: int = 60,
+    expires_minutes: int = 30,
 ) -> str:
     to_encode = data.copy()
 

@@ -1,22 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_admin
 from app.database import get_db
-from app.models.user import User
-from app.schemas.product import (
-    ProductCreate,
-    ProductResponse,
-    ProductUpdate,
-)
-from app.services.product_service import (
+from app.models.product import Product
+from app.schemas.product import ProductCreate, ProductResponse, ProductUpdate
+from app.services.product import (
     create_product,
-    delete_product,
-    get_product,
-    get_products,
     update_product,
+    soft_delete_product,
 )
 
 
@@ -27,87 +22,107 @@ router = APIRouter(
 
 
 @router.post(
-    "",
+    "/",
     response_model=ProductResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_product_endpoint(
-    product_data: ProductCreate,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    data: ProductCreate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(require_admin),
 ):
-    return create_product(
-        db,
-        product_data,
-    )
+    try:
+        product = create_product(
+            db=db,
+            name=data.name,
+            sku=data.sku,
+            description=data.description,
+            category_id=data.category_id,
+            price=data.price,
+            stock_quantity=data.stock_quantity,
+            is_active=data.is_active,
+        )
+        return product
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
 
 @router.get(
-    "",
+    "/",
     response_model=list[ProductResponse],
 )
-def list_products(
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
-    skip: int = Query(
-        default=0,
-        ge=0,
-    ),
-    limit: int = Query(
-        default=20,
-        ge=1,
-        le=100,
-    ),
-    category_id: int | None = Query(
-        default=None,
-        gt=0,
-    ),
-    search: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=150,
-    ),
+def get_products(
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(get_current_user),
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=100),
+    search: str | None = Query(None),
+    category_id: int | None = Query(None),
+    min_price: float | None = Query(None, ge=0),
+    max_price: float | None = Query(None, ge=0),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc"),
 ):
-    return get_products(
-        db=db,
-        skip=skip,
-        limit=limit,
-        category_id=category_id,
-        search=search,
-    )
+    query = select(Product).where(Product.is_active.is_(True))
+
+    if search:
+        query = query.where(
+            Product.name.ilike(f"%{search}%")
+        )
+
+    if category_id is not None:
+        query = query.where(
+            Product.category_id == category_id
+        )
+
+    if min_price is not None:
+        query = query.where(
+            Product.price >= min_price
+        )
+
+    if max_price is not None:
+        query = query.where(
+            Product.price <= max_price
+        )
+
+    if sort_by == "price":
+        sort_column = Product.price
+    elif sort_by == "name":
+        sort_column = Product.name
+    else:
+        sort_column = Product.created_at
+
+    if sort_order.lower() == "asc":
+        query = query.order_by(sort_column.asc())
+    else:
+        query = query.order_by(sort_column.desc())
+
+    query = query.offset(skip).limit(limit)
+
+    return list(db.scalars(query).all())
 
 
 @router.get(
     "/{product_id}",
     response_model=ProductResponse,
 )
-def get_product_endpoint(
+def get_product(
     product_id: int,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(get_current_user),
 ):
-    return get_product(
-        db,
-        product_id,
-    )
+    product = db.get(Product, product_id)
+
+    if not product or not product.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    return product
 
 
 @router.put(
@@ -116,41 +131,46 @@ def get_product_endpoint(
 )
 def update_product_endpoint(
     product_id: int,
-    product_data: ProductUpdate,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    data: ProductUpdate,
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(require_admin),
 ):
-    return update_product(
-        db,
-        product_id,
-        product_data,
-    )
+    product = db.get(Product, product_id)
+
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    try:
+        return update_product(
+            db,
+            product,
+            data.model_dump(exclude_unset=True),
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
 
 @router.delete(
     "/{product_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=ProductResponse,
 )
-def delete_product_endpoint(
+def delete_product(
     product_id: int,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    current_user=Depends(require_admin),
 ):
-    delete_product(
-        db,
-        product_id,
-    )
+    product = db.get(Product, product_id)
 
-    return None
+    if not product:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Product not found",
+        )
+
+    return soft_delete_product(db, product)

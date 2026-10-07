@@ -1,20 +1,17 @@
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_admin
 from app.database import get_db
 from app.models.user import User
-from app.schemas.order import (
-    OrderCreate,
-    OrderResponse,
-    OrderStatusUpdate,
-)
-from app.services.order_service import (
-    create_order,
-    get_order,
-    get_orders,
+from app.schemas.order import OrderResponse, OrderStatusUpdate
+from app.services.order import (
+    cancel_order,
+    create_order_from_cart,
+    get_customer_order,
+    get_customer_orders,
     update_order_status,
 )
 
@@ -25,27 +22,47 @@ router = APIRouter(
 )
 
 
+def build_order_response(order):
+    return OrderResponse(
+        id=order.id,
+        order_number=order.order_number,
+        customer_id=order.customer_id,
+        address_id=order.address_id,
+        subtotal=order.subtotal,
+        tax_amount=order.tax_amount,
+        delivery_charge=order.delivery_charge,
+        grand_total=order.grand_total,
+        status=order.status,
+        payment_status=order.payment_status,
+        delivered_at=order.delivered_at,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
+        items=order.order_items,
+    )
+
+
 @router.post(
     "",
     response_model=OrderResponse,
     status_code=status.HTTP_201_CREATED,
 )
 def create_order_endpoint(
-    order_data: OrderCreate,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    current_user: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    address_id: int = Query(..., gt=0),
 ):
-    return create_order(
-        db=db,
-        order_data=order_data,
-        current_user=current_user,
-    )
+    try:
+        order = create_order_from_cart(
+            db,
+            current_user.id,
+            address_id,
+        )
+        return build_order_response(order)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
 
 @router.get(
@@ -53,42 +70,30 @@ def create_order_endpoint(
     response_model=list[OrderResponse],
 )
 def list_orders(
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    current_user: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
-    skip: int = Query(
-        default=0,
-        ge=0,
-    ),
-    limit: int = Query(
-        default=20,
-        ge=1,
-        le=100,
-    ),
-    order_status: str | None = Query(
-        default=None,
-        min_length=1,
-        max_length=30,
-    ),
-    customer_email: str | None = Query(
-        default=None,
-        min_length=3,
-        max_length=150,
-    ),
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+    skip: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
 ):
-    return get_orders(
-        db=db,
-        skip=skip,
-        limit=limit,
-        order_status=order_status,
-        customer_email=customer_email,
-        current_user=current_user,
-    )
+    if current_user.role == "admin":
+        from app.models.order import Order
+
+        orders = (
+            db.query(Order)
+            .order_by(Order.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+    else:
+        orders = get_customer_orders(
+            db,
+            current_user.id,
+            skip,
+            limit,
+        )
+
+    return [build_order_response(order) for order in orders]
 
 
 @router.get(
@@ -97,32 +102,45 @@ def list_orders(
 )
 def get_order_endpoint(
     order_id: int,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    current_user: Annotated[
-        User,
-        Depends(get_current_user),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
 ):
-    order = get_order(
-        db,
-        order_id,
-    )
-
-    if (
-        current_user.role != "admin"
-        and order.user_id != current_user.id
-    ):
-        from fastapi import HTTPException
-
+    try:
+        order = get_customer_order(
+            db,
+            order_id,
+            current_user.id,
+            current_user.role,
+        )
+        return build_order_response(order)
+    except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only access your own orders",
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
         )
 
-    return order
+
+@router.post(
+    "/{order_id}/cancel",
+    response_model=OrderResponse,
+)
+def cancel_order_endpoint(
+    order_id: int,
+    db: Annotated[Session, Depends(get_db)],
+    current_user: Annotated[User, Depends(get_current_user)],
+):
+    try:
+        order = cancel_order(
+            db,
+            order_id,
+            current_user.id,
+        )
+        return build_order_response(order)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )
 
 
 @router.patch(
@@ -132,17 +150,18 @@ def get_order_endpoint(
 def update_order_status_endpoint(
     order_id: int,
     status_data: OrderStatusUpdate,
-    db: Annotated[
-        Session,
-        Depends(get_db),
-    ],
-    _: Annotated[
-        User,
-        Depends(require_admin),
-    ],
+    db: Annotated[Session, Depends(get_db)],
+    _: Annotated[User, Depends(require_admin)],
 ):
-    return update_order_status(
-        db=db,
-        order_id=order_id,
-        status_data=status_data,
-    )
+    try:
+        order = update_order_status(
+            db,
+            order_id,
+            status_data.status,
+        )
+        return build_order_response(order)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(exc),
+        )

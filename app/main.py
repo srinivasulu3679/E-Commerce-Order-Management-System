@@ -1,27 +1,40 @@
 from fastapi import FastAPI
 
 from app.routers import (
-    auth_router,
-    categories_router,
-    products_router,
-    orders_router,
+    auth,
+    categories,
+    products,
+    orders,
+    cart,
+    address,
+    payments,
+    returns,
+    reviews,
+    reports,
 )
 
 
 app = FastAPI(
     title="E-Commerce Order Management API",
     description=(
-        "A professional FastAPI backend for managing "
-        "users, categories, products, and customer orders."
+        "A complete FastAPI backend for managing "
+        "products, carts, orders, payments, returns, "
+        "refunds, reviews, and email notifications."
     ),
     version="1.0.0",
 )
 
 
-app.include_router(auth_router)
-app.include_router(categories_router)
-app.include_router(products_router)
-app.include_router(orders_router)
+app.include_router(auth.router)
+app.include_router(categories.router)
+app.include_router(products.router)
+app.include_router(orders.router)
+app.include_router(cart.router)
+app.include_router(address.router)
+app.include_router(payments.router)
+app.include_router(returns.router)
+app.include_router(reviews.router)
+app.include_router(reports.router)
 
 
 @app.get(

@@ -34,7 +34,8 @@ class User(Base):
     role: Mapped[str] = mapped_column(
         String(20),
         default="customer",
-        nullable=False
+        nullable=False,
+        index=True
     )
 
     created_at: Mapped[datetime] = mapped_column(
@@ -50,7 +51,38 @@ class User(Base):
         nullable=False
     )
 
+    # Customer -> Many Orders
     orders = relationship(
         "Order",
-        back_populates="user"
+        back_populates="customer",
+        cascade="all, delete-orphan"
+    )
+
+    # Customer -> One Cart
+    cart = relationship(
+        "Cart",
+        back_populates="customer",
+        uselist=False,
+        cascade="all, delete-orphan"
+    )
+
+    # Customer -> Many Addresses
+    addresses = relationship(
+        "Address",
+        back_populates="customer",
+        cascade="all, delete-orphan"
+    )
+
+    # Customer -> Many Reviews
+    reviews = relationship(
+        "Review",
+        back_populates="customer",
+        cascade="all, delete-orphan"
+    )
+
+    # Customer -> Many Returns
+    returns = relationship(
+        "ReturnRequest",
+        back_populates="customer",
+        cascade="all, delete-orphan"
     )

@@ -70,7 +70,7 @@ def get_current_user(
 def require_admin(
     current_user: Annotated[
         User,
-        Depends(get_current_user)
+        Depends(get_current_user),
     ],
 ) -> User:
     if current_user.role != "admin":
@@ -85,7 +85,7 @@ def require_admin(
 def require_customer(
     current_user: Annotated[
         User,
-        Depends(get_current_user)
+        Depends(get_current_user),
     ],
 ) -> User:
     if current_user.role not in {"customer", "admin"}:
@@ -95,3 +95,21 @@ def require_customer(
         )
 
     return current_user
+
+
+def require_roles(*allowed_roles: str):
+    def role_checker(
+        current_user: Annotated[
+            User,
+            Depends(get_current_user),
+        ],
+    ) -> User:
+        if current_user.role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You do not have permission to perform this action",
+            )
+
+        return current_user
+
+    return role_checker
