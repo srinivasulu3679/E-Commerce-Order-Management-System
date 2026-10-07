@@ -1,3 +1,4 @@
+
 import uuid
 from decimal import Decimal
 
@@ -22,23 +23,18 @@ def process_payment(
     method: str,
     amount: Decimal,
 ) -> Payment:
+
     if method not in VALID_PAYMENT_METHODS:
         raise ValueError("Invalid payment method")
 
     if order.status == "Cancelled":
-        raise ValueError(
-            "Cancelled orders cannot be paid"
-        )
+        raise ValueError("Cancelled orders cannot be paid")
 
     if order.payment_status == "Paid":
-        raise ValueError(
-            "Order has already been paid"
-        )
+        raise ValueError("Order has already been paid")
 
     if amount != order.grand_total:
-        raise ValueError(
-            "Payment amount must match order total"
-        )
+        raise ValueError("Payment amount must match order total")
 
     transaction_id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
 
@@ -70,6 +66,7 @@ def get_order_payments(
     db: Session,
     order: Order,
 ) -> list[Payment]:
+
     return list(
         db.scalars(
             select(Payment)
