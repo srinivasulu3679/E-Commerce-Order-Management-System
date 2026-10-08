@@ -1,11 +1,12 @@
-
+```python
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
 from app.auth.dependencies import get_current_user, require_admin
 from app.database import get_db
+from app.models.order import Order
 from app.models.user import User
 from app.schemas.order import OrderResponse, OrderStatusUpdate
 from app.services.order import (
@@ -15,6 +16,7 @@ from app.services.order import (
     get_customer_orders,
     update_order_status,
 )
+from app.utils.email import send_email
 
 
 router = APIRouter(
@@ -48,6 +50,7 @@ def build_order_response(order):
     status_code=status.HTTP_201_CREATED,
 )
 def create_order_endpoint(
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
     address_id: int = Query(..., gt=0),
@@ -58,6 +61,17 @@ def create_order_endpoint(
             current_user.id,
             address_id,
         )
+
+        background_tasks.add_task(
+            send_email,
+            current_user.email,
+            "Order Placed Successfully",
+            f"Hello {current_user.name},\n\n"
+            f"Your order {order.order_number} has been placed successfully.\n"
+            f"Order Total: {order.grand_total}\n\n"
+            "Thank you for shopping with us.",
+        )
+
         return build_order_response(order)
 
     except ValueError as exc:
@@ -78,8 +92,6 @@ def list_orders(
     limit: int = Query(20, ge=1, le=100),
 ):
     if current_user.role == "admin":
-        from app.models.order import Order
-
         orders = (
             db.query(Order)
             .order_by(Order.created_at.desc())
@@ -129,15 +141,33 @@ def get_order_endpoint(
 )
 def cancel_order_endpoint(
     order_id: int,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(get_current_user)],
 ):
     try:
-        order = cancel_order(
+        order = get_customer_order(
             db,
             order_id,
             current_user.id,
+            current_user.role,
         )
+
+        order = cancel_order(
+            db,
+            order,
+        )
+
+        background_tasks.add_task(
+            send_email,
+            current_user.email,
+            "Order Cancelled",
+            f"Hello {current_user.name},\n\n"
+            f"Your order {order.order_number} has been cancelled.\n"
+            "If payment was already completed, the payment has been marked for refund.\n\n"
+            "Thank you.",
+        )
+
         return build_order_response(order)
 
     except ValueError as exc:
@@ -154,11 +184,10 @@ def cancel_order_endpoint(
 def update_order_status_endpoint(
     order_id: int,
     status_data: OrderStatusUpdate,
+    background_tasks: BackgroundTasks,
     db: Annotated[Session, Depends(get_db)],
     current_user: Annotated[User, Depends(require_admin)],
 ):
-    from app.models.order import Order
-
     order = db.get(Order, order_id)
 
     if not order:
@@ -174,6 +203,36 @@ def update_order_status_endpoint(
             status_data.status,
         )
 
+        customer = db.get(User, order.customer_id)
+
+        if customer:
+            subject = None
+            body = None
+
+            if order.status == "Shipped":
+                subject = "Order Shipped"
+                body = (
+                    f"Hello {customer.name},\n\n"
+                    f"Your order {order.order_number} has been shipped.\n\n"
+                    "Thank you for shopping with us."
+                )
+
+            elif order.status == "Delivered":
+                subject = "Order Delivered"
+                body = (
+                    f"Hello {customer.name},\n\n"
+                    f"Your order {order.order_number} has been delivered successfully.\n\n"
+                    "Thank you for shopping with us."
+                )
+
+            if subject and body:
+                background_tasks.add_task(
+                    send_email,
+                    customer.email,
+                    subject,
+                    body,
+                )
+
         return build_order_response(order)
 
     except ValueError as exc:
@@ -181,3 +240,4 @@ def update_order_status_endpoint(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(exc),
         )
+```
